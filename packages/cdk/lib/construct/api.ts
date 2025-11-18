@@ -12,7 +12,6 @@ import { UserPool, UserPoolClient } from 'aws-cdk-lib/aws-cognito';
 import { IFunction } from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
-import { Table } from 'aws-cdk-lib/aws-dynamodb';
 import { IdentityPool } from 'aws-cdk-lib/aws-cognito-identitypool';
 import {
   AnyPrincipal,
@@ -45,6 +44,8 @@ import {
   IVpc,
   ISecurityGroup,
 } from 'aws-cdk-lib/aws-ec2';
+import { AttributeType, BillingMode, Table } from "aws-cdk-lib/aws-dynamodb";
+
 
 export interface BackendApiProps {
   // Context Params
@@ -692,6 +693,85 @@ export class Api extends Construct {
       securityGroups,
     });
 
+    // DynamoDB table for storing web content extractions  
+    const webContentTable = new Table(this, 'WebContentTable', {  
+      partitionKey: { name: 'PK', type: AttributeType.STRING },  
+      sortKey: { name: 'SK', type: AttributeType.STRING },  
+      billingMode: BillingMode.PAY_PER_REQUEST,  
+      removalPolicy: RemovalPolicy.DESTROY,  
+    });  
+  
+    // Lambda function for batch web content extraction  
+    const batchExtractFunction = new NodejsFunction(  
+      this,  
+      'BatchExtractWebContent',  
+      {  
+        runtime: LAMBDA_RUNTIME_NODEJS,  
+        entry: './lambda/batchExtractWebContent.ts',  
+        timeout: Duration.minutes(15),  
+        environment: {  
+          WEB_CONTENT_TABLE_NAME: webContentTable.tableName,  
+        },  
+        bundling: {  
+          nodeModules: ['node-html-parser'],  
+        },  
+        vpc,  
+        securityGroups,  
+      }  
+    );  
+    webContentTable.grantReadWriteData(batchExtractFunction);  
+  
+    // Lambda function for listing web content history  
+    const listWebContentFunction = new NodejsFunction(  
+      this,  
+      'ListWebContent',  
+      {  
+        runtime: LAMBDA_RUNTIME_NODEJS,  
+        entry: './lambda/listWebContent.ts',  
+        timeout: Duration.minutes(15),  
+        environment: {  
+          WEB_CONTENT_TABLE_NAME: webContentTable.tableName,  
+        },  
+        vpc,  
+        securityGroups,  
+      }  
+    );  
+    webContentTable.grantReadData(listWebContentFunction);  
+  
+    // Lambda function for getting specific web content by ID  
+    const getWebContentByIdFunction = new NodejsFunction(  
+      this,  
+      'GetWebContentById',  
+      {  
+        runtime: LAMBDA_RUNTIME_NODEJS,  
+        entry: './lambda/getWebContentById.ts',  
+        timeout: Duration.minutes(15),  
+        environment: {  
+          WEB_CONTENT_TABLE_NAME: webContentTable.tableName,  
+        },  
+        vpc,  
+        securityGroups,  
+      }  
+    );  
+    webContentTable.grantReadData(getWebContentByIdFunction);  
+  
+    // Lambda function for deleting web content  
+    const deleteWebContentFunction = new NodejsFunction(  
+      this,  
+      'DeleteWebContent',  
+      {  
+        runtime: LAMBDA_RUNTIME_NODEJS,  
+        entry: './lambda/deleteWebContent.ts',  
+        timeout: Duration.minutes(15),  
+        environment: {  
+          WEB_CONTENT_TABLE_NAME: webContentTable.tableName,  
+        },  
+        vpc,  
+        securityGroups,  
+      }  
+    );  
+    webContentTable.grantReadWriteData(deleteWebContentFunction);
+
     const createShareId = new NodejsFunction(this, 'CreateShareId', {
       runtime: LAMBDA_RUNTIME_NODEJS,
       entry: './lambda/createShareId.ts',
@@ -1042,12 +1122,47 @@ export class Api extends Construct {
     );
 
     // Used in the web content extraction use case
-    const webTextResource = api.root.addResource('web-text');
-    // GET: /web-text
-    webTextResource.addMethod(
-      'GET',
-      new LambdaIntegration(getWebTextFunction),
-      commonAuthorizerProps
+       const webTextResource = api.root.addResource('web-text');  
+    // GET: /web-text (existing endpoint - keep as is)  
+    webTextResource.addMethod(  
+      'GET',  
+      new LambdaIntegration(getWebTextFunction),  
+      commonAuthorizerProps  
+    );  
+  
+    // ============================================  
+    // NEW ENDPOINTS FOR BATCH WEB CONTENT  
+    // ============================================  
+      
+    // POST: /web-text/batch - Extract from multiple URLs  
+    const batchResource = webTextResource.addResource('batch');  
+    batchResource.addMethod(  
+      'POST',  
+      new LambdaIntegration(batchExtractFunction),  
+      commonAuthorizerProps  
+    );  
+  
+    // GET: /web-text/history - List saved extractions  
+    const historyResource = webTextResource.addResource('history');  
+    historyResource.addMethod(  
+      'GET',  
+      new LambdaIntegration(listWebContentFunction),  
+      commonAuthorizerProps  
+    );  
+  
+    // GET: /web-text/{id} - Get specific extraction by ID  
+    const contentIdResource = webTextResource.addResource('{id}');  
+    contentIdResource.addMethod(  
+      'GET',  
+      new LambdaIntegration(getWebContentByIdFunction),  
+      commonAuthorizerProps  
+    );  
+  
+    // DELETE: /web-text/{id} - Delete specific extraction  
+    contentIdResource.addMethod(  
+      'DELETE',  
+      new LambdaIntegration(deleteWebContentFunction),  
+      commonAuthorizerProps  
     );
 
     const shareResource = api.root.addResource('shares');

@@ -204,6 +204,46 @@ export type WebTextResponse = {
   text: string;
 };
 
+export type BatchExtractWebContentRequest = {  
+  urls: string[];  
+  context?: string;  
+  modelId: string;  
+};  
+  
+export type BatchExtractResult = {  
+  url: string;  
+  status: 'completed' | 'failed';  
+  extractedContent?: string;  
+  rawText?: string;  
+  error?: string;  
+  contentId?: string;  
+};  
+  
+export type BatchExtractWebContentResponse = {  
+  results: BatchExtractResult[];  
+};  
+  
+export type WebContentItem = {  
+  PK: string;  
+  SK: string;  
+  url: string;  
+  extractedContent: string;  
+  rawText: string;  
+  context?: string;  
+  modelId: string;  
+  createdAt: number;  
+  status: 'completed' | 'failed';  
+  error?: string;  
+};  
+  
+export type ListWebContentResponse = Pagination<WebContentItem>;  
+  
+export type GetWebContentByIdResponse = WebContentItem;  
+  
+export type DeleteWebContentResponse = {  
+  message: string;  
+};
+
 export type CreateShareIdResponse = {
   shareId: ShareId;
   userIdAndChatId: UserIdAndChatId;
